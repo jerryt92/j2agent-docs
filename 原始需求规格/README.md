@@ -73,7 +73,7 @@
 | REQ-PLAT-012 | 平台 | 对象存储与文件管理 | 多 OSS 供应商；浏览器直传；上传/删除对账；OSS-DB 差异检查与人工处置。 | — | 已实现 | [PLAT-FILE-001~008](#plat-file) | [文件管理与对象存储](../平台/文件管理与对象存储/README.md) | `FileManagementController`, `ObjectStorageService` |
 | REQ-PLAT-013 | 平台 | 聊天图片附件 | 对话图片上传（限 4 张）；proxy/direct 访问模式；WebSocket Base64 发送；删除会话 OSS 清理。 | — | 已实现 | [PLAT-IMG-001~005](#plat-img) | [聊天图片附件](../平台/聊天图片附件/README.md) | `ChatFileController`, `ChatAttachmentService` |
 | REQ-PLAT-014 | 平台 | 通用AI助手与知识库问答助手 | `universal_assistant` 展示为通用AI助手；新增 `knowledge_qa_assistant` 复用聊天页并支持多选知识库问答、前后端必选校验与 RAG 来源展示。 | — | 已实现 | [PLAT-RAG-015](#plat-rag), [PLAT-PLUGIN-007](#plat-plugin) | [平台通用助手](../平台/通用助手/README.md) | `UniversalAssistantConstants`, `KnowledgeQaAssistantAgent`, `ChatService`, `ChatView.vue` |
-| REQ-PLAT-015 | 平台 | 远程知识库名称 | 远程知识库创建/编辑时支持配置展示名称，前端按 `知识库名称 (collectionId)` 显示；名称存入远程仓库 `protocol_config.display_name`，不改变真实 collection id。 | — | 已实现 | [PLAT-RAG-016](#plat-rag) | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryDtos`, `KnowledgeRepositoryList.vue` |
+| REQ-PLAT-015 | 平台 | 远程知识库名称 | 远程知识库创建/编辑时支持配置展示名称，前端按 `知识库名称 (collectionId)` 显示；名称存入 `knowledge_repository.display_name`，不改变真实 collection id。 | — | 已实现 | [PLAT-RAG-016](#plat-rag) | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryDtos`, `KnowledgeRepositoryList.vue` |
 
 ### 2.2 前端
 
