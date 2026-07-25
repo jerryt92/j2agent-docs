@@ -157,7 +157,7 @@ System Prompt 定义：`UniversalAssistantAgent#loadSystemPrompt()`（Java 内�
 | 流式桥接 | `.../agent/builtin/SubAgentStreamBridge.java` |
 | 聊天入口 | `.../service/llm/ChatService.java` |
 | 记忆 Advisor | `.../advisor/ReactCompatibleMessageChatMemoryAdvisor.java` |
-| 知识库问答 Agent | `.../agent/builtin/KnowledgeQaAssistantAgent.java` |
+| 知识库问答 Agent | `.../agent/builtin/knowledgeqa/KnowledgeQaAssistantAgent.java` |
 | 动态多 collection 检索 | `.../service/rag/inf/DynamicKnowledgeCollectionsRetriever.java` |
 | 前端轨迹映射 | `j2agent-ui/.../stream/dispatcher.ts`、`agent-ui.ts` |
 

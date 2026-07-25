@@ -134,10 +134,10 @@ flowchart TB
 
 | 需求编号 | 需求名称 | 需求描述 | 状态 | 文档来源 | 代码验证 |
 |----------|----------|----------|------|----------|----------|
-| PLAT-RAG-001 | 知识库目录与 info.json 约定 | 根目录 root-path；仅 .md/.adoc/.asciidoc 入向量库；至少一个 info.json；禁止祖先/后代路径上多个 info.json | 已实现 | [知识库维护.md](../平台/RAG机制/知识库维护/知识库维护.md) | `KnowledgeRepoMetadataService` |
-| PLAT-RAG-002 | info.json 字段规范 | collection_name 必填；可选 partition_names、min_heading_level(1–3)、filename_as_title | 已实现 | 同上 | `KnowledgeRepoMetadataService` |
+| PLAT-RAG-001 | 知识库目录与列表配置约定 | 根目录 root-path；仅已配置知识库目录下的 .md/.adoc/.asciidoc 入向量库 | 已实现 | [知识库维护.md](../平台/RAG机制/知识库维护/知识库维护.md) | `KnowledgeRepoMetadataService` |
+| PLAT-RAG-002 | 知识库高级配置字段规范 | collectionName、partitionNames、minHeadingLevel(1–3)、filenameAsTitle 由知识库列表配置，并存储在 `metadata_config` JSON | 已实现 | 同上 | `KnowledgeRepoMetadataService` |
 | PLAT-RAG-003 | Markdown/AsciiDoc 分片规则 | 按标题层级分片；标题链作 Q、正文作 A；主键 sha1(sourcePath\|headingPath\|answer) | 已实现 | 同上 | `MarkdownQaParser` |
-| PLAT-RAG-004 | 增量知识库同步 | 启动/目录监听/管理端 API 触发；按文件 SHA、info.json SHA、collection 差异增删改 | 已实现 | 同上 | `KnowledgeRepoSyncService` |
+| PLAT-RAG-004 | 增量知识库同步 | 启动/目录监听/管理端 API 触发；按文件 SHA、高级配置指纹、collection 差异增删改 | 已实现 | 同上 | `KnowledgeRepoSyncService` |
 | PLAT-RAG-005 | 空 Collection 自动回收 | ACTIVE 文件数为 0 时 drop collection；后续写入自动重建 | 已实现 | 同上 | `MilvusKnowledgeWriteService` |
 | PLAT-RAG-006 | Exclusive 完全重建 | drop collection → resetClient → probe 维度 → 全量 re-embed；Redis 分布式锁 | 已实现 | 同上 | `KnowledgeRepoMaintenanceCoordinator` |
 | PLAT-RAG-007 | 维护协调器与状态机 | 单线程调度；任务类型 IDLE/INITIALIZING/PROBING/INCREMENTAL_SYNC/FULL_REBUILD/FAILED | 已实现 | 同上 | `KnowledgeRepoMaintenanceCoordinator` |
@@ -149,7 +149,7 @@ flowchart TB
 | PLAT-RAG-013 | 知识库静态文件 HTTP 直链 | GET /file/repo/** 按 root-path 读取；越界拒绝；Content-Type 按后缀映射 | 已实现 | 同上 | `FileController` |
 | PLAT-RAG-014 | 知识库管理 REST API | 同步接口最长等待 10 分钟；需 ADMIN；支持 fullRebuild 参数 | 已实现 | [知识库维护.md](../平台/RAG机制/知识库维护/知识库维护.md) | `KnowledgeController` |
 | PLAT-RAG-015 | 通用知识库问答助手多 collection 检索 | `knowledge_qa_assistant` 请求必须携带非空 `knowledgeCollections`；运行时按所选 collection 分别检索并合并去重，继续发布 RAG 来源 | 已实现 | [平台通用助手](../平台/通用助手/README.md) | `KnowledgeQaAssistantAgent`, `DynamicKnowledgeCollectionsRetriever`, `ChatService` |
-| PLAT-RAG-016 | 远程知识库展示名称 | 仅远程知识库可配置知识库名称；新增和编辑时均可填写；名称落库在 `protocol_config.display_name`，读取兼容旧 `protocol_config.alias`，可选精确覆盖为 `protocol_config.collectionAliases`；展示为 `知识库名称 (collectionId)`，请求和检索仍使用真实 collection id | 已实现 | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryList.vue`, `ChatView.vue` |
+| PLAT-RAG-016 | 知识库列表高级配置 | 本地与远程知识库均可配置展示名称、collection、分区、标题分片级别、文件名标题开关；根目录下未登记一级目录自动补成本地文件知识库；展示名为空时回退 repoCode，请求和检索仍使用真实 collection id | 已实现 | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryList.vue`, `ChatView.vue` |
 
 ### 4.2 平台 — 安全与用户 {#plat-sec}
 
