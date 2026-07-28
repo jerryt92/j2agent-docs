@@ -55,7 +55,7 @@ flowchart LR
 |------|--------------|----------|
 | 用户在 AI 助手入口对话 | `universal_assistant` | 用户消息、assistant（来自子智能体 bridge 或主 ReAct；编排 Trace 不落库） |
 | 编排服务 委派子智能体 | `universal_assistant`（同上） | 委派过程 `subAgentCallRun=true`，Advisor **跳过**专业键读写；可见答复仅落 universal 键 |
-| 用户直接进入专业 Agent | `<targetAgentId>`（目标 Agent 的 `getAgentId()`） | 完整 user / assistant 历史 |
+| 用户直接进入专业 Agent | `<targetAgentId>`（如 `intelligent_report`） | 完整 user / assistant 历史 |
 
 编排服务 以 `subAgentCallRun=true` 无状态调用子智能体；`userId:contextId:targetAgentId` 在委派时仅作运行时上下文（thinking、RAG 等），**不**持久化 ReAct 轮次。
 
@@ -93,7 +93,7 @@ OpenAPI：`j2agent/j2agent-model/src/main/resources/openapi-interface.yaml` / `o
 
 ## 流式进行中状态（Redis）
 
-WebSocket 一轮从首条用户消息到 `COMPLETED` / `FAILED` / `CANCELLED`，服务端在多实例间共享「是否仍在流式」标记，供删除历史等写操作拒绝误删。与 `ChatMemory` 缓存分离，由 `ActiveChatTurnRegistry` 维护。
+WebSocket 一轮从首条用户消息到 `COMPLETED` / `FAILED` / `CANCELLED`，服务端在多实例间共享「是否仍在流式」标记，供删除历史等写操作拒绝误删。与 `ChatMemory` 缓存分离，由 `ActiveChatTurnRegistry` 维护。页面刷新、断线、路由切换时的后台任务续跑与 snapshot 恢复见 [流式聊天后台化、队列化与重连恢复](../聊天后台任务与重连恢复/README.md)。
 
 ### 索引维度
 

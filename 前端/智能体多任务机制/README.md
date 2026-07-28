@@ -2,11 +2,14 @@
 
 ## 1. 机制概述
 
+本文聚焦前端侧的 activity store、左侧运行中标记、全局任务浮窗与按需续连。完整的“流式聊天后台化、Redis 输入队列、输出广播、snapshot 续传、主动停止控制面”见 [流式聊天后台化、队列化与重连恢复](../../平台/聊天后台任务与重连恢复/README.md)。
+
 前端允许用户**同时运行多个智能体流式对话**（不同 `agentId`、不同 `contextId` 可并行处于进行中状态）。机制核心是：
 
 - **`chatActivityStore`**：登记、更新、清除所有「进行中」会话，作为前端单一真相源；
 - **`chatSessionRegistry`**：内存会话运行时，与 activity 条目通过 `agentId + contextId` 关联；
-- **多消费方**：全局任务浮窗、侧边栏历史、聊天页、离开/登出守卫，均读取同一份 `activeEntries`。
+- **多消费方**：全局任务浮窗、侧边栏历史、聊天页均读取同一份 `activeEntries`。
+- **后台化任务**：页面刷新、切换、退出登录只断开当前观察连接，不取消后端 Agent 任务；刷新后先恢复左侧运行中标记，用户点进某个对话时才建立 `resume=true` WebSocket。
 
 单轮流式状态迁移（`THINKING` → `STREAMING_TEXT` → 终态等）由 WebSocket 事件驱动，约定见 [Agent-UI 交互机制](../../平台/agent-ui交互机制/README.md)。本文只描述前端如何**跟踪并行任务**及**在各 UI 暴露与切换**。
 
@@ -29,12 +32,12 @@ flowchart TB
     panel[ChatActivityPanel]
     sidebar[chatManage历史列表]
     chatView[ChatView进行中态]
-    leaveGuard[离开与登出守卫]
+    resume[刷新恢复入口]
   end
 
   subgraph session [chatSessionRegistry]
     activate[activateSession]
-    stopAll[stopAllActiveTurns]
+    resumeTurn[resumeTurn]
   end
 
   startTurn --> markActive
@@ -48,10 +51,29 @@ flowchart TB
   entries --> panel
   entries --> sidebar
   entries --> chatView
-  entries --> leaveGuard
+  entries --> resume
 
   panel -->|点击条目| activate
-  leaveGuard --> stopAll
+  resume --> resumeTurn
+```
+
+刷新后的运行中会话恢复不是“全部自动重连”，而是“全部恢复标记，按用户点击建立观察连接”：
+
+```mermaid
+flowchart LR
+  LS["localStorage<br/>ai.chat.activeTurns.v1"] --> BOOT["ChatView 启动"]
+  BOOT --> STORE["chatActivityStore<br/>恢复全部 active entries"]
+  STORE --> SIDEBAR["左侧历史列表<br/>彩色运行球"]
+  STORE --> PANEL["全局任务浮窗"]
+
+  SIDEBAR -->|点击某个 context| OPEN["showSessionView / openChatSession"]
+  PANEL -->|点击某个 context| OPEN
+  OPEN --> ACT["activateSession(agentId, contextId)"]
+  ACT --> WS["resumeTurn<br/>连接 resume=true WebSocket"]
+  WS --> SNAP["收到 snapshot 覆盖气泡"]
+  SNAP --> STREAM["继续接后续流式事件"]
+
+  STORE -.未点击.-> IDLE["不创建 WS<br/>不重新发送 ChatRequestDto"]
 ```
 
 ## 3. 模块与文件
@@ -69,7 +91,7 @@ Chat 业务逻辑位于 `src/pages/chat/ts/`，按职责分子目录。
 
 | 文件 | 职责 |
 |------|------|
-| `src/pages/chat/ts/session/registry.ts` | `chatSessionRegistry`：`peekSession` / `activateSession` / `stopAllActiveTurns` |
+| `src/pages/chat/ts/session/registry.ts` | `chatSessionRegistry`：`peekSession` / `activateSession` / 会话内存管理 |
 | `src/pages/chat/ts/session/open.ts` | `openChatSession`：激活会话并按需路由跳转 |
 | `src/pages/chat/ts/session/types.ts` | `buildSessionKey`、`ChatSessionRuntime` 等类型 |
 
@@ -77,16 +99,8 @@ Chat 业务逻辑位于 `src/pages/chat/ts/`，按职责分子目录。
 
 | 文件 | 职责 |
 |------|------|
-| `src/pages/chat/ts/stream/service.ts` | `startTurn` / `stopTurn`；与 activity store 同步 |
+| `src/pages/chat/ts/stream/service.ts` | `startTurn` / `resumeTurn` / `stopTurn`；与 activity store 同步 |
 | `src/pages/chat/ts/stream/agent-ui.ts` | 状态 i18n、`formatStepLabelParts` 等 |
-
-### guard — 离开守卫
-
-| 文件 | 职责 |
-|------|------|
-| `src/pages/chat/ts/guard/leave.ts` | `guardLeaveWithActiveTasks`、`stopAllActiveChatTurns` |
-| `src/pages/chat/ts/guard/before-unload.ts` | `useWarnBeforeUnloadOnActiveTasks`：拦截 F5 / Ctrl+R |
-| `src/pages/chat/ts/index.ts` | App 层 barrel 导出 |
 
 ### 其他
 
@@ -97,8 +111,8 @@ Chat 业务逻辑位于 `src/pages/chat/ts/`，按职责分子目录。
 | `src/pages/chat/components/chatManage.vue` | 侧边栏历史，进行中标记 |
 | `src/pages/chat/components/ChatView.vue` | 聊天主视图，发送预标记 |
 | `src/pages/chat/chatThinkGlow.scss` | 流式光晕 mixin |
-| `src/routes/index.ts` | `goToLogout` 登出前守卫 |
-| `lib/core/App.vue` | 挂载浮窗与 `useWarnBeforeUnloadOnActiveTasks` |
+| `src/routes/index.ts` | 菜单登出直接 `goTo('/logout')`，不中断后台任务 |
+| `lib/core/App.vue` | 挂载浮窗 |
 
 ## 4. 活跃任务仓库 `chatActivityStore`
 
@@ -142,11 +156,11 @@ type ChatActivityEntry = {
 | `onmessage` 每条 Agent UI 事件 | `updateState(..., currentAgentState)` |
 | `onTurnClose` / 连接正常结束 | `markInactive` |
 | `stopTurn` 用户主动停止 | `markInactive` |
-| `onerror`（非 401） | 记录终态后 `markInactive` |
+| `resumeTurn` 刷新后恢复 | `markActive(..., 'THINKING')` 并连接 `resume=true` |
 
 **辅助写入**：`ChatView.sendMessage` 在发起请求前可预调用 `markActive(..., 'THINKING')`，减少 UI 空窗期。
 
-**批量清理**：`chatSessionRegistry.stopAllActiveTurns`（`ts/session/registry.ts`）遍历 `activeEntries`，对每个条目停止流并 `markInactive`；用于用户确认离开或登出。
+**后台化语义**：普通刷新、页面切换、退出登录不再批量停止任务；用户显式点击停止时才调用 `stopTurn` 并向后端发送 `user interrupt`。
 
 ```mermaid
 sequenceDiagram
@@ -164,6 +178,26 @@ sequenceDiagram
   WS->>AS: markInactive
 ```
 
+主动停止会先走 REST stop 控制面，再本地收敛 UI；其它客户端收到同一 `turnId` 的 `CANCELLED` 后也会同步停止：
+
+```mermaid
+sequenceDiagram
+  participant A as 当前客户端
+  participant API as stopChatTurn API
+  participant BE as 后端 Turn Control
+  participant WS as WebSocket 输出广播
+  participant O as 其它客户端
+  participant AS as chatActivityStore
+
+  A->>API: stopTurn(contextId, agentId)
+  API->>BE: 取消 session active turn
+  A->>AS: optimistic markInactive
+  BE-->>WS: 广播 CANCELLED(turnId)
+  WS-->>A: 当前气泡收敛为 CANCELLED
+  WS-->>O: 当前气泡收敛为 CANCELLED
+  O->>AS: markInactive
+```
+
 ## 6. 会话切换与跳转
 
 ### 6.1 `chatSessionRegistry` 要点
@@ -173,7 +207,6 @@ sequenceDiagram
 | `peekSession(agentId, contextId)` | 只读内存会话，**不创建**（列表展示用） |
 | `activateSession(agentId, contextId)` | 激活指定会话为当前 `activeSessionKey` |
 | `ensureActiveSessionForAgent(agentId)` | 同 agent 下优先保留当前 active，否则取最近访问，否则新建 |
-| `stopAllActiveTurns()` | 停止所有进行中流并清理 activity |
 
 ### 6.2 `openChatSession`
 
@@ -235,19 +268,20 @@ const isHistoryItemBusy = (item) =>
 
 - 发送消息前 `markActive(..., 'THINKING')`；
 - 通过 `chatActivityStore.isActive(agentId, contextId)` 判断当前会话是否进行中，驱动 UI _busy 态；
-- 会话切换走 `activateSession` / `ensureActiveSessionForAgent`。
+- 会话切换走 `activateSession` / `ensureActiveSessionForAgent`；
+- 启动时读取 `getRememberedActiveTurnsForAgent`，只把当前 agent 的运行中 context 标记到 `chatActivityStore`，用于左侧概览彩色球；
+- 不自动打开运行中会话，也不自动连接 WebSocket；
+- 用户点击某个运行中历史会话后，`showSessionView` 激活该 context 并调用 `resumeTurn` 接回流。
 
-### 8.4 离开与登出守卫
+### 8.4 离开、刷新与登出
 
 | 入口 | 文件 | 行为 |
 |------|------|------|
-| `guardLeaveWithActiveTasks` | `ts/guard/leave.ts` | `activeEntries.length > 0` 时弹窗确认，确认后 `stopAllActiveChatTurns` |
-| `useWarnBeforeUnloadOnActiveTasks` | `ts/guard/before-unload.ts` | 拦截 F5 / Ctrl+R，同上逻辑 |
-| `goToLogout` | `src/routes/index.ts` | 登出前调用 `guardLeaveWithActiveTasks`，确认后才 `location.hash = '/logout'` |
+| 浏览器刷新 / 关闭页面 | 无前端 guard | 直接离开，只断开当前观察连接 |
+| 路由切换 | 无前端 guard | 直接切换，不停止后台任务 |
+| 菜单登出 | `src/pages/components/menuCard.vue` | 直接 `goTo('/logout')`，不中断后台任务 |
 
-`lib/core/App.vue` 在 `setup` 中调用 `useWarnBeforeUnloadOnActiveTasks()`。
-
-文案键：`ai.activity.beforeunload*`（§10）。
+后台任务由后端继续运行；页面恢复时通过 `localStorage` 中的 active turn 记录和 `resume=true` WebSocket 接回。
 
 ## 9. 全局任务浮窗 UI 实现
 
@@ -352,7 +386,6 @@ chat-activity-panel（根锚点，width/height: 0）
 | `ai.activity.panel.empty` | 暂无运行中的任务 |
 | `ai.activity.panel.empty.hint` | 去选择智能体，开始对话 |
 | `ai.activity.panel.empty.cta` | 选择智能体 |
-| `ai.activity.beforeunload*` | 离开/刷新确认文案 |
 
 文件：`src/locale/lang/chat/zh-ai.js`、`src/locale/lang/chat/en-ai.js`。
 
@@ -360,5 +393,5 @@ chat-activity-panel（根锚点，width/height: 0）
 
 1. **`updateState` 不碰 `updatedAt`**：列表顺序反映用户交互，而非 LLM 推送频率。
 2. **`peekSession` 而非 `getOrCreate`**：列表展示不意外创建空会话。
-3. **单一 `chatActivityStore`**：浮窗、侧边栏、守卫共用，避免状态分叉。
-4. **离开必先 `stopAllActiveTurns`**：确认离开后统一断流并清理条目。
+3. **单一 `chatActivityStore`**：浮窗、侧边栏、聊天页共用，避免状态分叉。
+4. **前端只是观察者**：离开页面不等于取消任务；取消必须来自用户显式停止。

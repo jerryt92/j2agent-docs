@@ -1,6 +1,6 @@
-# AI Center 文档中心
+# J2Agent 文档中心
 
-本目录集中存放 **inc-ai** 工作区内 AI Center 相关项目文档，按主题归类为四大板块。
+本目录集中存放 **j2agent-ai** 工作区内 J2Agent 相关项目文档，按主题归类为四大板块。
 
 ## 平台 — 平台能力
 
@@ -11,6 +11,7 @@
 | [LLM 提供商配置](平台/LLM提供商配置/README.md) | `api_provider_config`、深度思考元数据 |
 | [Agent 记忆机制](平台/agent记忆机制/README.md) | 多轮记忆、`conversationId`、滑动窗口、Redis/JDBC、流式进行中状态 |
 | [Agent-UI 交互机制](平台/agent-ui交互机制/README.md) | 状态机、`AgentUiEventEnvelope`、WebSocket 事件 |
+| [流式聊天后台化、队列化与重连恢复](平台/聊天后台任务与重连恢复/README.md) | Redis 输入队列、输出广播、UI/LLM 解耦、snapshot 续传与主动停止控制面 |
 | [插件 Agent 接入与界面](平台/插件Agent接入与界面/README.md) | 插件 JAR → 注册 → REST/WebSocket 全链路 |
 | [平台通用助手](平台/通用助手/README.md) | 内置 `universal_assistant` / `knowledge_qa_assistant`、子智能体编排、知识库多选问答与双轨记忆 |
 | [文件管理与对象存储](平台/文件管理与对象存储/README.md) | 虚拟目录、直传、差异检查、S3/阿里云 OSS/七牛 |
@@ -24,11 +25,11 @@
 
 ## 前端
 
-前端代码路径均**相对于前端工程根目录**，写作 `src/...`、`lib/...`，不写具体项目/仓库名（如 `j2agent-web/`）。Chat 模块逻辑集中在 `src/pages/chat/ts/`。
+前端代码路径均**相对于前端工程根目录**，写作 `src/...`、`lib/...`，不写具体项目/仓库名（如 `j2agent-ui/`）。Chat 模块逻辑集中在 `src/pages/chat/ts/`。
 
 | 文档 | 说明 |
 |------|------|
-| [智能体多任务机制](前端/智能体多任务机制/README.md) | 并行流式任务登记、会话跳转、离开守卫与全局任务浮窗 |
+| [智能体多任务机制](前端/智能体多任务机制/README.md) | 并行流式任务登记、会话跳转、刷新恢复入口与全局任务浮窗 |
 | [Markdown 解析器](前端/md解析器/README.md) | 聊天气泡 Markdown 渲染与图表懒加载 |
 
 ## agent开发 — Agent 插件开发
