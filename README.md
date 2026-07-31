@@ -15,6 +15,7 @@
 | [插件 Agent 接入与界面](平台/插件Agent接入与界面/README.md) | 插件 JAR → 注册 → REST/WebSocket 全链路 |
 | [平台通用助手](平台/通用助手/README.md) | 内置 `universal_assistant` / `knowledge_qa_assistant`、子智能体编排、知识库多选问答与双轨记忆 |
 | [文件管理与对象存储](平台/文件管理与对象存储/README.md) | 虚拟目录、直传、差异检查、S3/阿里云 OSS/七牛 |
+| [审计](平台/审计/README.md) | 管理员 Token 用量总览/明细、跨用户聊天记录只读审计 |
 | [聊天图片附件](平台/聊天图片附件/README.md) | 对话图片上传、访问模式、引用保护与 LLM 投递 |
 
 ## 基础设施 — 部署与运维

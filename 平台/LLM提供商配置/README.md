@@ -283,6 +283,8 @@ group by user_id, context_id, agent_id, turn_id;
 
 `billable_token_count` 当前默认按 provider 返回的 `total_tokens` 1:1 记录；cache read/create 明细已保存，后续接价格表或折扣倍率时可基于明细重新核算。
 
+管理员可通过页面与 REST **查询**用量总览/明细，见 [审计（Token 用量 / 聊天记录）](../审计/README.md)。
+
 ## 2. baseUrl 填写示例
 
 管理端在「模型连接参数 → Base URL」下按提供商展示示例；下表与线上一致。
