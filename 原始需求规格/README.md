@@ -74,6 +74,7 @@
 | REQ-PLAT-013 | 平台 | 聊天图片附件 | 对话图片上传（限 4 张）；proxy/direct 访问模式；WebSocket Base64 发送；删除会话 OSS 清理。 | — | 已实现 | [PLAT-IMG-001~005](#plat-img) | [聊天图片附件](../平台/聊天图片附件/README.md) | `ChatFileController`, `ChatAttachmentService` |
 | REQ-PLAT-014 | 平台 | 通用AI助手与知识库问答助手 | `universal_assistant` 展示为通用AI助手；新增 `knowledge_qa_assistant` 复用聊天页并支持多选知识库问答、前后端必选校验与 RAG 来源展示。 | — | 已实现 | [PLAT-RAG-015](#plat-rag), [PLAT-PLUGIN-007](#plat-plugin) | [平台通用助手](../平台/通用助手/README.md) | `UniversalAssistantConstants`, `KnowledgeQaAssistantAgent`, `ChatService`, `ChatView.vue` |
 | REQ-PLAT-015 | 平台 | 远程知识库名称 | 远程知识库创建/编辑时支持配置展示名称，前端按 `知识库名称 (collectionId)` 显示；名称存入 `knowledge_repository.display_name`，不改变真实 collection id。 | — | 已实现 | [PLAT-RAG-016](#plat-rag) | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryDtos`, `KnowledgeRepositoryList.vue` |
+| REQ-PLAT-016 | 平台 | 管理员审计 | ADMIN 可查看 Token 用量总览/明细与跨用户聊天记录只读详情；独立 `/audit/*` API，不扩大用户态 `/context*`。 | — | 已实现 | [PLAT-AUDIT-001~004](#plat-audit) | [审计](../平台/审计/README.md) | `AuditController`, `AuditService`, `src/pages/audit/` |
 
 ### 2.2 前端
 
@@ -235,6 +236,15 @@ flowchart TB
 | PLAT-IMG-003 | 访问模式 proxy/direct | `j2agent.storage.access-mode`（`J2AGENT_STORAGE_ACCESS_MODE`）；proxy 经应用转发；direct 预签名直链；失败降级 proxy | 已实现 | 同上 | `ChatAttachmentUrlResolver` |
 | PLAT-IMG-004 | WebSocket attachments | Base64 data 发送；持久化仅存 objectKey；LLM 从 OSS 读字节 | 已实现 | 同上 | `ChatController`, `ChatAttachmentService` |
 | PLAT-IMG-005 | 删除会话 OSS 清理 | deleteByConversationId 清引用与孤儿文件；整 context 删除前缀清扫 | 已实现 | 同上 | `ChatContextService` |
+
+### 4.8.1 平台 — 审计 {#plat-audit}
+
+| 需求编号 | 需求名称 | 需求描述 | 状态 | 文档来源 | 代码验证 |
+|----------|----------|----------|------|----------|----------|
+| PLAT-AUDIT-001 | ADMIN 审计页 | 路由 `/audit`；左菜单 Token用量 / 聊天记录；位于文件管理入口前 | 已实现 | [审计](../平台/审计/README.md) | `src/pages/audit/`, `src/routes/audit.ts` |
+| PLAT-AUDIT-002 | Token 总览与明细 | `/audit/token/summary` 按用户聚合 + 全局合计；`/audit/token/records` 调用明细；AVAILABLE 参与合计 | 已实现 | 同上 | `AuditController`, `LlmUsageRecordMapper` |
+| PLAT-AUDIT-003 | 跨用户聊天只读 | `/audit/contexts`、`/audit/context` 直读会话表；响应 `AuditContextDetailDto`；不调用、不扩大用户态 `/context*` | 已实现 | 同上 | `AuditService`, `ChatContextItemMapper` |
+| PLAT-AUDIT-004 | 分页与字段搜索 | offset/limit；时间范围、用户、agent、标题/模型等筛选 | 已实现 | 同上 | `AuditService`, `TokenUsagePanel.vue`, `ChatRecordPanel.vue` |
 
 ### 4.9 前端 — 智能体多任务机制 {#fe-task}
 

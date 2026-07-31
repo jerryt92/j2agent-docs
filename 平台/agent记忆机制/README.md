@@ -66,6 +66,7 @@ flowchart LR
 - **WebSocket**：连接参数 `agent-id` 与 `conversationId` 第三段一致，即可与 HTTP 历史对齐。
 - **HTTP**：`getHistoryContext` **必填** `agent-id`；`getHistoryContextList` 可选 `agent-id` 过滤；`deleteHistoryContext` 可选 `agent-id`（不传则删除该 `context-id` 下 **全部** 智能体行）；`MessageFeedbackRequest` 携带 `agentId`。
 - **按 ID 删除**：`DELETE /context?context-id=...` 删除前经 `ActiveChatTurnRegistry` 检查，流式中返回 **409**（`CHAT_CONTEXT_IN_PROGRESS`）。
+- **管理员跨用户只读**：独立 `/v1/rest/j2agent/audit/contexts` 与 `/audit/context`，不扩大上述用户态接口；见 [审计](../审计/README.md)。
 - **全部清除**：`DELETE /context?clear-all=true`（可选 `agent-id`）服务端查询用户全部历史，**跳过运行中会话**后删除其余。
 
 OpenAPI：`j2agent/j2agent-model/src/main/resources/openapi-interface.yaml` / `openapi-model.yaml`。
