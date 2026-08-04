@@ -74,6 +74,7 @@
 | REQ-PLAT-013 | 平台 | 聊天图片附件 | 对话图片上传（限 4 张）；proxy/direct 访问模式；WebSocket Base64 发送；删除会话 OSS 清理。 | — | 已实现 | [PLAT-IMG-001~005](#plat-img) | [聊天图片附件](../平台/聊天图片附件/README.md) | `ChatFileController`, `ChatAttachmentService` |
 | REQ-PLAT-014 | 平台 | 通用AI助手与知识库问答助手 | `universal_assistant` 展示为通用AI助手；新增 `knowledge_qa_assistant` 复用聊天页并支持多选知识库问答、前后端必选校验与 RAG 来源展示。 | — | 已实现 | [PLAT-RAG-015](#plat-rag), [PLAT-PLUGIN-007](#plat-plugin) | [平台通用助手](../平台/通用助手/README.md) | `UniversalAssistantConstants`, `KnowledgeQaAssistantAgent`, `ChatService`, `ChatView.vue` |
 | REQ-PLAT-015 | 平台 | 远程知识库名称 | 远程知识库创建/编辑时支持配置展示名称，前端按 `知识库名称 (collectionId)` 显示；名称存入 `knowledge_repository.display_name`，不改变真实 collection id。 | — | 已实现 | [PLAT-RAG-016](#plat-rag) | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryDtos`, `KnowledgeRepositoryList.vue` |
+| REQ-PLAT-017 | 平台 | 远程知识库子路径同步 | 远程 Git 知识库允许配置多个仓库内相对子路径；路径不能重复或互为父子路径；配置后 JGit 同步仅物化并扫描这些子路径，未配置时保持整库同步。 | — | 已实现 | [PLAT-RAG-017](#plat-rag) | [知识库维护](../平台/RAG机制/知识库维护/知识库维护.md#21-远程知识库机制) | `GitKnowledgeRepositorySyncer`, `KnowledgeRepositorySubPathSupport`, `KnowledgeRepositoryList.vue` |
 | REQ-PLAT-016 | 平台 | 管理员审计 | ADMIN 可查看 Token 用量总览/明细与跨用户聊天记录只读详情；独立 `/audit/*` API，不扩大用户态 `/context*`。 | — | 已实现 | [PLAT-AUDIT-001~004](#plat-audit) | [审计](../平台/审计/README.md) | `AuditController`, `AuditService`, `src/pages/audit/` |
 
 ### 2.2 前端
@@ -151,6 +152,7 @@ flowchart TB
 | PLAT-RAG-014 | 知识库管理 REST API | 同步接口最长等待 10 分钟；需 ADMIN；支持 fullRebuild 参数 | 已实现 | [知识库维护.md](../平台/RAG机制/知识库维护/知识库维护.md) | `KnowledgeController` |
 | PLAT-RAG-015 | 通用知识库问答助手多 collection 检索 | `knowledge_qa_assistant` 请求必须携带非空 `knowledgeCollections`；运行时按所选 collection 分别检索并合并去重，继续发布 RAG 来源 | 已实现 | [平台通用助手](../平台/通用助手/README.md) | `KnowledgeQaAssistantAgent`, `DynamicKnowledgeCollectionsRetriever`, `ChatService` |
 | PLAT-RAG-016 | 知识库列表高级配置 | 本地与远程知识库均可配置展示名称、collection、分区、标题分片级别、文件名标题开关；根目录下未登记一级目录自动补成本地文件知识库；展示名为空时回退 repoCode，请求和检索仍使用真实 collection id | 已实现 | [知识库维护](../平台/RAG机制/知识库维护/README.md) | `KnowledgeRepositoryService`, `KnowledgeRepositoryList.vue`, `ChatView.vue` |
+| PLAT-RAG-017 | 远程 Git 知识库子路径同步 | `subPaths` 存入 `protocol_config`；路径规范化后禁止重复、嵌套和越界；配置后 JGit 使用 `noCheckout`/指定路径 checkout 只物化子路径，增量扫描同步收窄到对应扫描根 | 已实现 | [知识库维护.md](../平台/RAG机制/知识库维护/知识库维护.md#21-远程知识库机制) | `GitKnowledgeRepositorySyncer`, `KnowledgeRepoMetadataService`, `KnowledgeRepoSyncService` |
 
 ### 4.2 平台 — 安全与用户 {#plat-sec}
 
