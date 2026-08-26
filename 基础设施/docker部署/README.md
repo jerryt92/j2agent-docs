@@ -11,7 +11,9 @@
 | `etcd` | Milvus 元数据（外置，先于 Milvus 启动） | `ETCD_PORT`（2379） |
 | `rustfs` | S3 兼容对象存储（供文件管理和 Milvus 使用） | `RUSTFS_API_PORT` / `RUSTFS_CONSOLE_PORT`（RustFS 默认 9000 / 9001 前面加 1，即 19000 / 19001） |
 | `milvus` | 向量库（standalone + 外置 etcd） | `MILVUS_PORT`（19530） |
-| `j2agent` | Spring Boot 后端 + 托管前端静态资源 | `J2AGENT_PORT`（如 30112） |
+| `j2agent` | Spring Boot 后端 + 托管前端静态资源（仅 Compose 内网） | `J2AGENT_PORT`（默认 30111） |
+| `nginx` | HTTPS 证书终止与反向代理 | `J2AGENT_NGINX_PORT`（默认 30112） |
+| `nginx` HTTP 入口 | 直接 HTTP 或重定向 HTTPS | `J2AGENT_HTTP_REDIRECT_PORT`（默认 30113；`J2AGENT_ENFORCE_HTTPS=false` 时直接 HTTP） |
 
 前端 **不打包进镜像**：通过宿主机目录 `${J2AGENT_VOLUMES_PATH}/volumes/j2agent/ui` 挂载到容器 `/opt/j2agent/volume/ui`，由 `product` profile 以 `file:` 方式提供。详见 [前端静态资源更新.md](./前端静态资源更新.md)。
 
@@ -61,7 +63,7 @@
    docker compose up -d --build
    ```
 
-5. 访问：`http://<主机>:${J2AGENT_PORT}/`（需 `volumes/j2agent/ui/index.html` 已就位）。
+5. 访问：`https://<主机>:${J2AGENT_NGINX_PORT}/`（需 `volumes/j2agent/ui/index.html` 已就位）。
 
 6. **首次配置 LLM**（必做）：使用种子账号 `aiadmin` 登录 → **设置 → LLM 接口** / **Embedding 接口**，各添加一条配置并设为「当前」且「启用」。否则启动日志会出现 `未找到生效中的 LLM 配置`，对话与知识库同步不可用。详见 [LLM 提供商配置](../../平台/LLM提供商配置/README.md#10-首次部署与启动日志)。
 
