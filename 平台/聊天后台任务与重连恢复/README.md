@@ -20,7 +20,7 @@
 - 不要 output 跨节点阻塞消费；输出走 Redis Pub/Sub 广播。
 - worker 默认使用 JDK 虚拟线程。
 
-当前实现仍保留 `chat-queue.enabled`、`output-cache-enabled`、`max-pending-per-session` 等配置项，生产环境建议保持默认开启。
+当前实现仍保留 `chat-queue.enabled`、`max-pending-per-session` 等配置项，生产环境建议保持默认开启。
 
 ## 2. 核心标识
 
@@ -210,6 +210,16 @@ sequenceDiagram
 - queued 阶段不算 running。
 - 只有进入 `ChatService` 后才有真实 `turnId` 和 active turn。
 - worker 必须等 terminal callback 后才能释放该 turn 的执行槽。
+- 回合开始即预落库 user 消息（所有 Agent，含非委派），避免工具等待期间刷新后历史里连提问都没有。
+- 事件流上会按节流间隔 `touch` active-chat-turn 心跳；工具等待期间若仍有 TOOL/SYSTEM 等事件，心跳可续期。snapshot 主要靠 `saveStateTrailEvent` / `saveSnapshot` 写入时顺带续 TTL。
+- 终态时才 `flushTurnTrace` 写入记忆中的 `turn_trace` 审计行；工具等待中途历史接口看不到完整 `turnSteps`。
+
+记忆写入与“刷新后历史能看到什么”（工具等待中途）：
+
+| 模式 | 历史里可见 | 历史里隐藏 / 尚无 |
+|------|------------|-------------------|
+| 非委派直聊 | user（预落库） | `assistant_tool_calls`（`displayInChat=false`）；尚无最终正文、`turn_trace` |
+| 委派（子 Agent 执行中） | user（预落库，写在 `universal_assistant` 会话键） | 子 Agent 不写父会话记忆；尚无最终正文、`turn_trace` |
 
 ## 6. Output 派
 
@@ -320,59 +330,95 @@ Redis key：
 | `contextId` | 会话 ID |
 | `agentId` | Agent ID |
 | `turnId` | 当前真实 turn |
-| `answerContent` | 当前已生成回答全文 |
+| `answerContent` | 当前已生成回答全文（可为空：工具等待期往往还没有正文） |
 | `reasoningContent` | 当前已生成思考全文 |
 | `state` | 当前状态 |
 | `updatedAt` | 更新时间 |
-| `stateTrail` | 轻量状态轨迹 |
+| `stateTrail` | 轻量状态轨迹（可回放的事件序列） |
 
 写入规则：
 
-- 每次主 Agent 输出 delta 后，用累计全文刷新 snapshot。
-- 每次委派子 Agent 输出 delta 后，也刷新父 turn 的 snapshot。
-- 状态事件写入 `stateTrail`，用于恢复编排、工具、取消等 UI 状态。
+- 每次主 Agent 输出 text delta 后，用累计全文 `saveSnapshot`。
+- 每次委派子 Agent 输出 delta 后，经 `SubAgentStreamBridge` 刷新**父** turn 的 snapshot。
+- 任意 Agent-UI 事件经 `recordingResponseCall` 时调用 `saveStateTrailEvent`；若尚无 snapshot，会先建一条 `answerContent=""` 的骨架，再追加 trail——因此**工具等待期间也可能已有 snapshot**（只有步骤、没有正文），这是正常现象。
 - snapshot 没有开关，默认就是后台任务恢复机制的一部分。
-- TTL 只做异常兜底。
+- TTL 只做异常兜底；有写入时会顺带续期。
+
+`stateTrail` 的 payload 策略（resume 回放用）：
+
+| 事件 | trail 中是否保留 payload | 原因 |
+|------|--------------------------|------|
+| `TOOL` / `SYSTEM` 等非 MESSAGE | 保留 | 恢复工具名、编排态等步骤 UI |
+| `MESSAGE` + `phase=PATCH` | **保留** | 携带 `srcFile`、`pendingQuestion` 等补丁；清空会导致刷新后来源丢失 |
+| `MESSAGE` + `phase=DELTA`（正文 token） | **置空** | 正文权威在 snapshot 全文；回放 delta 会重复 append |
+
+后端 resume 下发顺序（`sendSnapshotIfPresent`）：
+
+1. 按序回放 `stateTrail`（含 PATCH 上来源）。
+2. 再发一条 `MESSAGE` + `snapshot=true` 的全文覆盖帧（`answerContent` / `reasoningContent`）。
+3. 之后继续接实时 Pub/Sub 事件。
+
+若无 snapshot，但 `activeChatTurnRegistry.isActive` 或输入队列仍有 pending，则只挂上观察连接、不发 `resume-empty`（等后续实时事件）。两者都没有才发 `notice: resume-empty`。
 
 清理规则：
 
-- turn `COMPLETED` 后清理 snapshot。
-- turn `FAILED` 后清理 snapshot。
-- turn `CANCELLED` 后清理 snapshot。
+- turn `COMPLETED` / `FAILED` / `CANCELLED` 后清理 snapshot。
 - 最终展示以历史记录接口为准。
 
 ## 9. 页面刷新与按需续传
 
-前端不应该为了恢复运行中状态而自动连接所有 WebSocket。
+前端不应该为了恢复运行中状态而自动连接**所有**会话的 WebSocket；但对“当前要展示的会话”会走 resume。
 
-正确模型：
+实际入口不止“侧边栏点历史”，还包括：
+
+- 刷新后 `bootstrapAgentSession` 读 `ai.chat.browserLatestSession.v1`，自动 `showSessionView` 最近会话。
+- 从首页再进同一智能体：同 agent 内存会话也必须走 `showSessionView`，以便 WS 已断时 resume。
+- 侧边栏点击历史会话 / 全局任务浮窗点进运行中上下文。
+
+### 9.1 终态只信 Redis（禁止前端用历史猜）
+
+**权威判定在后端 `handleResumeConnection`，全部读 Redis：**
+
+| 顺序 | Redis 条件 | 行为 |
+|------|------------|------|
+| 1 | 存在 `{app}:chat:output:snapshot:{contextId}:{agentId}` | 回放 `stateTrail` + 全文 snapshot，继续观察 |
+| 2 | `activeChatTurnRegistry.isActive`（counter + 心跳未过期）或输入队列 size > 0 | 不发 empty，挂观察连接等实时事件 |
+| 3 | 以上皆无 | 下发 `notice: resume-empty`（`COMPLETED`/`SYSTEM`） |
+
+前端：
+
+- localStorage / `chatActivityStore` 只表示“本地认为可能还在跑”，**不是**终态权威。
+- 点进会话后：加载历史仅用于展示；若本地仍标记活跃（或历史拉取失败 forceProbe），建立 `resume=true` WS。
+- **只有**收到 `resume-empty` 才清理 localStorage 与 activity；不要把探测帧写入状态机。
+- **禁止**再用历史里“有没有可见 assistant 正文 / srcFile / turnSteps”判断是否终态（曾导致工具等待期、来源 PATCH 后回首页再进误清 running）。
 
 ```mermaid
 flowchart TD
-  BOOT["页面启动"] --> LOCAL["读取 localStorage active turns"]
-  LOCAL --> STORE["恢复 chatActivityStore"]
-  STORE --> LIST["左侧历史列表显示彩色运行球"]
-  STORE --> PANEL["全局任务浮窗显示运行中任务"]
-
-  LIST --> CLICK["用户点进某个会话"]
-  CLICK --> HIST["先加载历史记录"]
-  HIST --> DONE{"历史已终态?"}
-  DONE -->|是| FIX["清理运行中标记<br/>不连接 WS"]
-  DONE -->|否| WS["建立 resume=true WebSocket"]
-  WS --> SNAP{"后端有 snapshot 或有效恢复事件?"}
-  SNAP -->|有| APPLY["补 stateTrail<br/>全文覆盖 assistant 气泡"]
-  APPLY --> STREAM["继续接后续 delta"]
-  SNAP -->|无| FIX
+  BOOT["页面启动 / 点进会话"] --> LOCAL["localStorage 彩色球提示"]
+  BOOT --> HIST["getHistoryContext 仅用于展示"]
+  HIST --> REM{"本地仍标记本会话活跃?<br/>或 forceProbe"}
+  REM -->|否| STATIC["只展示历史，不 resume"]
+  REM -->|是| WS["建立 resume=true WebSocket"]
+  WS --> REDIS{"后端读 Redis"}
+  REDIS -->|有 snapshot| APPLY["回放 stateTrail + 全文覆盖"]
+  APPLY --> STREAM["继续接实时事件"]
+  REDIS -->|无 snapshot 但 active/队列| WAIT["挂观察连接"]
+  WAIT --> STREAM
+  REDIS -->|皆无| EMPTY["resume-empty → 清理本地 running 标记"]
 ```
 
-纠偏规则：
+### 9.2 前端锚点与可见气泡（易踩坑）
 
-- 左侧彩色球代表“本地认为可能仍在运行”，不是绝对权威。
-- 用户点进会话后，先加载历史记录。
-- 如果历史记录已经显示 `COMPLETED` / `FAILED` / `CANCELLED`，立即清理 running 标记。
-- 如果历史没有终态，再用 `resume=true` 建立 WebSocket。
-- resume 后如果没有 snapshot、没有有效状态轨迹、只有空连接，应清理 running 标记。
-- 停止过早、还没有 LLM 输出、只有用户气泡的场景，也按这个规则纠偏。
+`messageContext` 保留完整历史（含隐藏行），渲染用 `visibleMessageContext` 过滤 `displayInChat === false`。
+
+resume / 流式写入依赖 `ensureTurnAssistant` → `findReusableEmptyAssistantIndex`：在最新 user 之后找“正文为空的 assistant”复用。
+
+**必须跳过不可渲染行**（`displayInChat !== false`）。否则会把历史里的隐藏 `assistant_tool_calls` 当成锚点：步骤条、正文、来源都写进隐藏行，页面上“提问在、助手气泡全无”。这是非委派工具等待期刷新后“续不上”的常见根因；委派模式因不落该隐藏行而天然免疫（见 §12）。
+
+补充：
+
+- 工具等待期 snapshot 的 `answerContent` 可以为空：页面应至少能恢复步骤条；有 PATCH 时应恢复来源；正文等后续实时 delta。
+- 死掉的 `session.ws` 引用（`CLOSED`）不得挡住 resume，应清掉后重连。
 
 ## 10. UI 与 LLM 解耦
 
@@ -387,9 +433,9 @@ flowchart TD
 
 前端运行中状态来源：
 
-- `localStorage ai.chat.activeTurns.v1`：刷新后恢复“哪些会话可能运行中”。
-- `chatActivityStore`：当前页面运行中状态，驱动左侧彩色球、全局任务浮窗、输入框 busy 态。
-- 历史记录和 resume 结果用于纠偏。
+- `localStorage ai.chat.activeTurns.v1`：刷新后提示“哪些会话可能运行中”（非权威）。
+- `chatActivityStore`：当前页彩色球 / 浮窗 / busy 态（非权威）。
+- **Redis（经 resume WS）**：snapshot / active-chat-turn 心跳 / 输入队列；`resume-empty` 是清理本地标记的唯一权威信号。
 
 ## 11. 主动停止控制面
 
@@ -471,6 +517,20 @@ flowchart TD
 - 子 Agent 状态必须进入父 snapshot 的 `stateTrail`。
 - 子 Agent 取消检查必须走父 `turnId`。
 - 父 session 停止时，子 Agent 不允许继续输出、继续落库、继续推送。
+- 子 Agent 以 `subAgentCallRun=true` 运行：`ReactCompatibleMessageChatMemoryAdvisor` **跳过**对该子会话键的记忆读写，避免污染父会话历史。
+
+### 12.1 为何委派模式下“工具等待期刷新”更容易看起来正常
+
+重连协议对两种模式是同一套（snapshot + stateTrail + resume WS）。体感差异来自**数据是否写进父会话 / 父 snapshot**：
+
+| 对比项 | 非委派直聊（工具执行中） | 委派（子 Agent / `sub_agent_call` 执行中） |
+|--------|--------------------------|---------------------------------------------|
+| 父会话记忆 | 已有隐藏 `assistant_tool_calls` | 通常只有预落库的 user；无隐藏空 assistant |
+| 父 snapshot 正文 | 往往仍为空（本轮尚未产出可见文本） | 子 Agent 流式 token 持续写入父 `answerContent` |
+| resume 后前端锚点 | 若误复用隐藏行 → 气泡不可见（见 §9.2） | 无隐藏空行 → 新建可见气泡 |
+| 用户可见期望 | 至少：提问 + 步骤条（CALLING_TOOL）；正文可后到 | 提问 + 步骤条 + 往往已有部分正文 |
+
+因此：**不要把“委派能续上、非委派不能”归因于重连机制分叉**；先查历史隐藏行是否污染锚点、PATCH 来源是否进了 trail、snapshot 是否仅有空正文。
 
 ## 13. 配置
 
@@ -486,7 +546,6 @@ com:
         max-pending-per-session: 3        # 单会话排队上限，0 表示不限制
         take-timeout-seconds: 5           # worker 从具体会话队列等待任务的超时时间
         queued-task-ttl-seconds: 300      # 空闲输入队列 key 兜底 TTL
-        output-cache-enabled: true        # 运行中 snapshot 开关
         output-cache-ttl-seconds: 300     # 运行中 snapshot 兜底 TTL
       active-chat-turn:
         heartbeat-ttl-seconds: 30
@@ -501,9 +560,11 @@ com:
 - `max-pending-per-session`：同一 `contextId + agentId` 在 Redis 中最多排队的输入数；超出后向前端返回队列满失败事件。
 - `take-timeout-seconds`：ready 标记可能重复，worker 从 session queue 等待任务的短超时。
 - `queued-task-ttl-seconds`：输入队列 key 的异常兜底过期时间。
-- `output-cache-enabled` / `output-cache-ttl-seconds`：运行中 snapshot 开关与兜底 TTL；生产环境建议保持开启以支持刷新恢复。
+- `output-cache-ttl-seconds`：运行中 snapshot 兜底 TTL；snapshot 默认开启，回答完成后主动删除。
 
 ## 14. 状态流转
+
+下图是**任务生命周期**示意（queued → running → 终态），不是 Agent 状态机全集。运行中还会出现 `CALLING_TOOL` / `LOAD_SKILL` / `AGENT_ORCHESTRATING` / `STREAMING_TEXT` 等，这些会进入 `stateTrail` 供 resume 回放。
 
 ```mermaid
 stateDiagram-v2
@@ -523,9 +584,9 @@ stateDiagram-v2
 
 前端展示：
 
-- `QUEUED` / `RUNNING` / `THINKING` / `STREAMING`：显示运行中彩色球。
+- busy 态（含 `THINKING` / `CALLING_TOOL` / `LOAD_SKILL` / `STREAMING_TEXT` / `AGENT_ORCHESTRATING` 等）：显示运行中彩色球。
 - `COMPLETED` / `FAILED` / `CANCELLED`：清理 activity 和 localStorage。
-- 如果页面本地认为运行中，但历史记录或 resume 证明已经终态，立即纠偏。
+- 本地仍标记运行中时，以 resume 的 Redis 结果纠偏：收到 `resume-empty` 立即清理；有 snapshot / active 则继续观察。
 
 ## 15. 验证清单
 
@@ -534,10 +595,12 @@ stateDiagram-v2
 - 同一 `contextId + agentId` 连续发送多条消息，应串行执行。
 - 不同 `contextId + agentId` 在 worker 有空闲时可并发执行。
 - 页面刷新、切换路由、退出登录不应中断后台任务。
-- 左侧运行中彩色球不应自动建立所有 WebSocket。
-- 用户点进运行中会话后，才建立 `resume=true` 连接。
-- resume 后应先补状态轨迹，再用 snapshot 全文覆盖 assistant 气泡，后续 delta 继续 append。
-- 如果点进后发现历史已终态或没有有效 snapshot，应清理运行中标记。
+- 左侧运行中彩色球不应自动为所有会话建立 WebSocket。
+- 点进会话或刷新自动重入最近会话时，才对该会话建立 `resume=true` 连接。
+- resume 后应先补状态轨迹（含 MESSAGE/PATCH 来源），再用 snapshot 全文覆盖 assistant 气泡，后续 delta 继续 append。
+- 如果点进后收到 `resume-empty`（Redis 无 snapshot、无 active、无队列），应清理运行中标记。
+- 非委派工具等待中刷新：应看到提问气泡 + 可见助手气泡上的步骤条；无正文时不应误判为“重连失败”。
+- 回首页再进同一对话：同 agent 内存会话也必须 resume；终态只信 Redis，不信内存半成品气泡。
 - 同一用户多个客户端打开同一会话，应同时收到同一份输出。
 - 任意客户端主动停止后，所有客户端都收到同一真实 `turnId` 的 `CANCELLED`。
 - 委派子 Agent 运行中停止时，父流和子流都应被取消。
@@ -558,6 +621,19 @@ stateDiagram-v2
 - 委派子 Agent delta 是否写回父 turn snapshot。
 - resume 是否读取 `contextId + agentId` 对应 snapshot。
 - 前端 snapshot 事件是否覆盖 assistant 气泡，而不是 append。
+
+如果工具等待期刷新后**提问在、助手气泡 / 步骤条全无**（协议层往往正常）：
+
+1. 打开 resume WS 的 Messages：是否已有 `turn-started` / `TOOL START CALLING_TOOL` / `snapshot` 等回放帧。若有帧而页面无气泡 → 不是重连失败，是前端渲染锚点问题。
+2. 查历史接口：最新 user 之后是否有 `displayInChat=false` 的空 assistant（`TOOL_ROUND`）。
+3. 查前端 `findReusableEmptyAssistantIndex` / `isRenderableAssistant`：是否把隐藏行当成了本轮锚点。
+4. 对照委派会话：父历史上不应有该隐藏行；若委派正常、非委派异常，优先查这一条。
+
+如果刷新后**来源（srcFile）没了**，按顺序排查：
+
+- `saveStateTrailEvent` 是否对 `MESSAGE` + `PATCH` **保留**了 payload（正文 `DELTA` 仍应置空）。
+- resume 回放的 PATCH 帧 payload 里是否仍有 `message.srcFile`。
+- 前端 `applyMessageDelta` 是否在收到 PATCH 时 `mergeSrcFiles`。
 
 如果停止后 LLM 还在输出，按顺序排查：
 
