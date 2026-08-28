@@ -168,6 +168,8 @@ flowchart TB
 | PLAT-SEC-008 | 注册邮箱白名单 | 支持精确邮箱与 *@domain；开启但 rules 空则全拒 | 已实现 | 同上 | `EmailRegisterService` |
 | PLAT-SEC-009 | SMTP 发信配置 | 存 ai_properties；host/port/from 必填；HTML+纯文本模板 | 已实现 | 同上 | `EmailVerificationService` |
 | PLAT-SEC-010 | 邮箱找回密码 | 公开 API；独立 Redis 命名空间；已注册才发信（防枚举）；重置后失效会话 | 已实现 | 同上 | `ResetPasswordController` |
+| PLAT-SEC-011 | API Key 用户身份认证 | `Authorization: Bearer apikey-...` 与 JWT 分流；Key 一对一创建 API 专用用户，随机 Key 的 SHA-256 哈希存储、Redis 30 分钟滑动缓存、删除立即失效 | 已实现 | [用户权限.md](../平台/安全与用户/用户权限.md) | `ApiAccessKeyService`, `LoginService` |
+| PLAT-SEC-012 | API Key 管理 | ADMIN 可在设置页创建、列表、改角色、删除 API Key；完整 Key 仅创建时显示，中英文界面同步 | 已实现 | 同上 | `ApiAccessKeyController`, `ApiKeyManagementPanel.vue` |
 
 ### 4.3 平台 — LLM 提供商配置 {#plat-llm}
 
