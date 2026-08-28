@@ -1,6 +1,6 @@
 # 审计（Token 用量 / 聊天记录）
 
-本文档说明管理员 **审计** 功能：跨用户查看 Token 用量总览/明细，以及只读查看任意用户的聊天会话与消息。
+本文档说明管理员 **审计** 功能：跨用户查看及删除 Token 用量、查看及删除任意用户的聊天会话与消息。
 
 Token **落库**机制见 [LLM 提供商配置 · Token usage 明细落库](../LLM提供商配置/README.md#14-token-usage-明细落库)；本文只覆盖 **查询与管理端 UI**。
 
@@ -10,9 +10,9 @@ Token **落库**机制见 [LLM 提供商配置 · Token usage 明细落库](../L
 - 页面布局与文件管理一致：顶栏 + 左侧菜单 + 内容区（`SidebarPageLayout`）。
 - 左侧菜单两项：
   1. **Token用量**：默认按用户聚合总览；可选用户后看调用明细。
-  2. **聊天记录**：必选用户后列会话；抽屉只读查看消息，内容按聊天气泡同款 Markdown 渲染（表格、Mermaid 等），不提供删除/反馈。
+  2. **聊天记录**：可按用户列会话；抽屉只读查看消息，内容按聊天气泡同款 Markdown 渲染（表格、Mermaid 等）。
 - 列表均支持分页（`offset`/`limit`，前端页大小 `10/20/50/100`）与字段筛选。
-- **不扩大** 现有用户态 `/v1/rest/j2agent/context*`：普通用户仍只能访问自己的会话；审计走独立 `/audit/*` 接口。
+- **不扩大** 现有用户态 `/v1/rest/j2agent/context*`：普通用户仍只能访问自己的会话；审计读写走独立 `/audit/*` 接口。
 
 ## 2. 产品交互
 
@@ -43,11 +43,26 @@ flowchart LR
 
 合计规则：总览与全局合计只统计 `usage_status = 'AVAILABLE'`；明细列表可含 `UNAVAILABLE`。
 
+API Key 专用用户的 `app_user.id` 为 `char(32)`，历史用量行的 `user_id`（varchar）可能带尾部空格。审计查询按 `trim(user_id)` 关联用户并筛选明细，避免点开 API 用户后看不到调用行。
+
+用户选择器按面板独立取数，避免出现筛选后无结果的用户：
+
+- Token 用量只返回 `llm_usage_record` 中有记录的用户；
+- 聊天记录只返回 `chat_context_record` 中有会话的用户；
+- 若历史记录的 `user_id` 已不在 `app_user`，仍可筛选，并按当前语言显示“已删除用户 / Deleted user”。两个来源**不得取并集**。
+
 ### 2.2 聊天记录
 
 1. 工具栏用户可选（不选则查全部）；按 `update_time` 倒序（`context_id` 编码后无法按字符串还原 UUIDv7 时间序）。
 2. 会话表：标题、agentId、contextId、更新时间；筛标题关键字、agent、时间范围。
-3. 「查看」打开抽屉，拉取该用户会话消息；过滤 `displayInChat === false` 的行；`renderMarkdownCached` + `renderMarkdownBlocks` 渲染正文与推理内容；不展示删除/反馈操作。
+3. 「查看」打开抽屉，拉取该用户会话消息；过滤 `displayInChat === false` 的行；`renderMarkdownCached` + `renderMarkdownBlocks` 渲染正文与推理内容；不提供消息反馈。
+
+### 2.3 删除审计数据
+
+- Token 明细与聊天会话表均支持勾选多条后删除；跨页保留明确勾选项，筛选变化、手动刷新和删除完成后清空选择。
+- Token 总览行的「删除」会删除该 `user_id` 的**全部** `llm_usage_record` 明细，不受当前时间、模型或状态筛选限制。
+- 删除会话前校验整批目标；任一会话正在生成则整体拒绝，避免部分删除。删除成功后会清理消息、会话记录、会话内存和无引用附件；同一 `contextId` 仍有其他 agent 会话时保留附件。
+- 所有删除均需二次确认，且仅 `ADMIN` 可调用。
 
 ## 3. REST API
 
@@ -61,8 +76,13 @@ Service：`AuditService`。
 |------|------|------|
 | GET | `/audit/token/summary` | 按用户聚合总览 + `total` + 全局合计字段 |
 | GET | `/audit/token/records` | 调用明细列表 + `total` |
+| DELETE | `/audit/token/records` | 按记录 ID 批量删除 Token 明细 |
+| DELETE | `/audit/token/users` | 按用户批量删除该用户全部 Token 明细 |
 | GET | `/audit/contexts` | 按 `user-id`（可选）列会话 + `total` |
+| DELETE | `/audit/contexts` | 按 `(contextId, agentId)` 批量删除会话 |
 | GET | `/audit/context` | 按 `context-id` + `agent-id` 取消息（`AuditContextDetailDto`） |
+
+用户筛选 API：`GET /v1/rest/j2agent/audit-users?source=token|context`。`source` 必填，决定从 Token 或会话历史中提取可筛选用户。
 
 ### 3.1 Token 总览 `GET /audit/token/summary`
 
@@ -117,6 +137,14 @@ Query：`user-id`、`agent-id`、`model-name`（模糊）、`call-kind`、`usage
 
 用户态 `/v1/rest/j2agent/context*` 仍只返回当前登录用户自己的会话，审计能力不反向扩大到该路径。
 
+### 3.5 删除接口
+
+| 接口 | 请求体 | 行为 |
+|------|--------|------|
+| `DELETE /audit/token/records` | `{ "ids": ["..."] }` | 删除明确选择的 Token 明细；空、重复或不存在 ID 返回错误。 |
+| `DELETE /audit/token/users` | `{ "userIds": ["..."] }` | 删除每个用户的全部 Token 明细；不应用 UI 查询条件。 |
+| `DELETE /audit/contexts` | `{ "items": [{ "contextId": "...", "agentId": "..." }] }` | 删除明确选择的会话；空、重复、不存在或运行中的会话返回错误，整批不产生部分删除。 |
+
 ## 4. 数据与索引
 
 | 表 | 用途 |
@@ -144,7 +172,7 @@ CREATE INDEX idx_llm_usage_user_time ON llm_usage_record (user_id, create_time);
 | 导航 | `src/pages/components/menuCard.vue`、`src/pages/HomePage.vue`（MCP 与文件管理之间） |
 | 页面 | `src/pages/audit/index.vue`、`pages/TokenUsagePanel.vue`、`pages/ChatRecordPanel.vue` |
 | API / 类型 | `src/api/audit.api.ts`、`src/types/audit.types.ts` |
-| 用户选择 | `AuditUserPicker` 分页弹窗，内部调用 `getUserList()` 后前端筛选分页 |
+| 用户选择 | `AuditUserPicker` 分页弹窗；调用 `getAuditUserList(source)`，按 Token / 会话面板独立获取有数据的用户，含已删除用户虚拟项 |
 | 时间范围 | `GlassTimeRangePicker`（快捷预设 + 日历自定义） |
 | i18n | `src/locale/lang/zh.js`、`en.js`（`audit.*`、`common.timeRange.*`） |
 
@@ -163,6 +191,5 @@ UI 约定对齐文件管理：`.toolbar` / `.toolbar__filters` / `.table-wrap` /
 
 ## 7. 不在范围内
 
-- 聊天删除、批量清理、消息反馈
 - Token 导出、按消息 ID 关联用量、价格表核算
 - 扩大用户态 `/context*` 权限
