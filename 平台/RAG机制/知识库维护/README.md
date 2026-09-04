@@ -48,7 +48,7 @@
 | 展示规则 | `displayName` 为空时以 `repoCode` 作为展示回退；聊天选择使用 repositoryId，内部解析真实 collection |
 | 状态展示 | 见 [§2.2 知识库列表状态展示](知识库维护.md#22-知识库列表状态展示) |
 
-展示名称只影响前端显示，不改变 Milvus collection 名称。聊天请求使用 `knowledgeRepositoryIds`；仓库授权互相独立，不因共享 collection 合并。普通用户可以创建私有库，管理、授权和删除要求见 [用户权限](../../安全与用户/用户权限.md)。
+展示名称只影响前端显示，不改变 Milvus collection 名称。聊天请求使用 `knowledgeRepositoryIds`；仓库授权互相独立，不因共享 collection 合并。当前知识库管理接口要求 `KNOWLEDGE_ADMIN`，普通用户不能创建、修改、同步或删除知识库；管理、授权、删除和用户删除后的所有权规则见 [用户权限](../../安全与用户/用户权限.md)。
 
 远程知识库机制已合并到 [知识库维护 §2.1](知识库维护.md#21-远程知识库机制)：远端内容通过 JGit 同步到 `knowledge-repo/{repoCode}`，随后复用本地知识库的扫描、分片、增量入库与静态资源直链流程。
 

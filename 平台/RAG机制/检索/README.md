@@ -20,6 +20,7 @@
 | Milvus 混合检索 | `.../service/rag/vdb/milvus/MilvusService.java` |
 | 对话 RAG | `.../service/rag/inf/AbstractCollectionKbRetriever.java` |
 | SimpleRag | `.../service/rag/inf/AbstractSimpleRagRetriever.java`、`.../service/rag/SimpleRagStoreSyncService.java` |
+| Markdown grep/read | `j2agent-plugins-agents/common-tools/.../plugins/tool/KnowledgeRepoGrepTools.java` |
 
 ## 仓库授权与范围传递
 
@@ -37,7 +38,16 @@
 
 该 ThreadLocal 范围只覆盖当前同步调用，不能作为异步任务自动继承身份的依据。SimpleRAG 是 Agent 随附资料，沿用 Agent 使用权限，不要求另有仓库授权。
 
-文件预览、下载及历史引用的撤权行为见 [静态文件展示机制](../静态文件展示机制.md)。当前说明依据工作区代码；共享 collection 越权、各检索分支与权限中途过期的完整链路仍需集成验证。
+### grep/read 工具权限边界
+
+插件通用工具 [`KnowledgeRepoGrepTools`](../../../../j2agent-plugins-agents/common-tools/src/main/java/io/github/jerryt92/j2agent/plugins/tool/KnowledgeRepoGrepTools.java) 按绑定的知识库子目录工作。例如 `kbRelativeSubPath=j2agent-docs` 时，只代表 `j2agent-docs` 这个仓库代码，不是可以任意扫描的文件系统目录。
+
+- `grep_knowledge_repo` 和 `read_knowledge_repo_file` 都先从 `ToolContext` 解析当前轮原始用户，再调用 `ResourceAccessService.requireRepository(user, repoCode, 2)` 校验读权限；未注入权限服务、没有当前用户、用户无权或仓库标识非法时直接返回“无权访问该知识库”，不会扫描或读取磁盘。
+- `read_knowledge_repo_file` 在仓库校验后还会按来源路径调用 `requireSource`，仅允许仓库内的 `.md` 文件；绝对路径、`..` 路径和越出绑定仓库的路径均拒绝。
+- grep 只匹配 Markdown 正文行和文件名，忽略大小写；单次最多扫描 500 个文件、返回 40 处命中，单文件上限 512 KiB，并保留命中行前后各 2 行上下文。较长中文关键词无直接命中时会按中文片段拆词回退。
+- read 默认最多返回 32,000 字符，单文件同样受 512 KiB 限制；可选图片改写和命中文件来源发布不改变权限校验。
+
+文件预览、下载及历史引用的撤权行为见 [静态文件展示机制](../静态文件展示机制.md)。共享 collection 不是授权单位；所有检索分支、正文回填、来源文件和 grep/read 都必须回到仓库权限边界。
 
 ## 与知识库维护的关系
 
