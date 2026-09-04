@@ -30,13 +30,14 @@
 
 知识库问答助手复用聊天页布局，但输入区不展示“选择智能体”，改为单个省略号下拉触发器：
 
-- 下拉项来自 `GET /knowledge/collections`，左侧为复选框，支持多选。
+- 下拉项来自 `GET /knowledge/collections`，按当前用户可读仓库过滤，以 `repositoryId` 区分仓库，支持多选；共享 collection 的仓库仍分别显示。
 - 前端将最近有效选择写入当前会话 runtime，并同步到 `localStorage` key `ai-knowledge-qa-selected-collections`。
 - 未选择任何 collection 时阻止发送，并提示“请至少选择一个知识库”。
-- WebSocket 请求携带 `ChatRequestDto.knowledgeCollections`。
+- WebSocket 请求携带 `ChatRequestDto.knowledgeRepositoryIds`，内容为仓库 ID。后端校验后转换为含 repoCode 与 collection 的内部选择值；旧 `knowledgeCollections` 兼容输入也须经过可读范围校验。
 - 后端在 `ChatService` 对 `knowledge_qa_assistant` 请求二次校验，空数组返回可识别错误码 `knowledgeCollectionsRequired`。
 - 检索由 `DynamicKnowledgeCollectionsRetriever` 按 `AgentRunContext.knowledgeCollections` 逐个 collection 调用 `Retriever.retrieveRagChunksResult`，合并去重后返回文档。
-- 下拉展示名优先使用远程知识库配置的知识库名称，格式为 `知识库名称 (collectionId)`；未配置名称时显示 collection id。省略号按钮显示当前已选数量。
+- 展示名称取仓库配置，物理 collection 仅为存储信息；选择值使用仓库 ID，不能凭同一 collection 推定拥有其他仓库权限。省略号按钮显示当前已选数量。
+- 明确选择中只要有一个无权或不存在的仓库，本轮返回 `KNOWLEDGE_ACCESS_DENIED`，不启动检索或 LLM；重建中或失败仓库返回 `KNOWLEDGE_UNAVAILABLE`。历史选择需重新鉴权。
 
 ## 2. 端到端架构
 
@@ -135,7 +136,7 @@ System Prompt 定义：`UniversalAssistantAgent#loadSystemPrompt()`（Java 内�
 
 ## 7. 与专业智能体的关系
 
-- **可调用子智能体列表**：`AgentRouter.listCallableSubAgents()` = 全部已注册 `AiAgent` **减去** `universal_assistant` 与 `knowledge_qa_assistant`。
+- **可调用子智能体列表**：`AgentRouter.listCallableSubAgents()` 提供排除两个内置助手后的业务 Agent 集合，编排服务再与当前用户可使用的 Agent 求交集。原始注册表不是用户可见候选列表。公开 Agent 或有效等级 2 授权可用；管理员绕过授权过滤。
 - **同一 contextId**：编排委派**不**写入 `userId:contextId:<targetAgentId>`；仅用户直接进入该专业 Agent 时才会在该键下积累历史。
 
 ## 8. 前端轨迹

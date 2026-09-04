@@ -93,7 +93,22 @@ flowchart TB
 
 容器中全部 `AiAgent` Bean 会监听 **`McpToolCallbacksRefreshedEvent`**，在 MCP 工具回调更新后执行 **`rebuildAgent()`**（见 `McpToolCallbacksRefreshedListener`）。已实现 **`McpFeature`** 的 Agent 会在重建时由基类 `buildToolCallbacks()` 重新合并 MCP 工具，因此该机制会同步刷新其运行时图。
 
-## 8. 新增插件内 Agent 时的检查清单
+## 8. 知识库 grep/read 工具与权限
+
+`j2agent-plugins-agents/common-tools` 提供 [`KnowledgeRepoGrepTools`](../../../j2agent-plugins-agents/common-tools/src/main/java/io/github/jerryt92/j2agent/plugins/tool/KnowledgeRepoGrepTools.java)，供插件 Agent 对绑定知识库中的 Markdown 做行级检索和原文读取。它不是全局 Spring Bean，而是在 Agent 的 `buildTools()` 中按 `kbRelativeSubPath` 构造；例如绑定 `j2agent-docs` 时，工具只能服务该知识库。
+
+使用前必须调用 `setResourceAccess(ResourceAccessService)`。每次 `grep_knowledge_repo` 或 `read_knowledge_repo_file` 都从 `ToolContext` 解析当前轮用户，并以该用户调用 `requireRepository(..., 2)`；无用户、无权限、权限服务未注入或仓库标识非法时直接拒绝，不访问磁盘。读取文件还会二次调用 `requireSource` 校验来源仓库和真实相对路径。
+
+工具边界如下：
+
+- 仅处理 `.md` 文件；禁止绝对路径、`..` 路径和越出绑定仓库的子目录。
+- grep 最多扫描 500 个文件、返回 40 处命中、单文件 512 KiB，命中行上下文为前后各 2 行；支持文件名匹配和大小写不敏感的正文匹配，并对较长中文关键词做片段回退。
+- read 默认最多返回 32,000 字符，单文件 512 KiB；可选重写 Markdown 图片路径。
+- `setPublishMatchedFilesAsSources(true)` 只负责把命中文件发布为聊天来源，不会扩大可读范围；来源发布仍使用当前对话与原始用户上下文。
+
+因此，Agent 已经获得使用权限，并不等于它可以读取任意知识库；Agent 权限和知识库权限必须同时满足，知识库公开/创建者/用户授权规则仍由 `ResourceAccessService` 统一执行。
+
+## 9. 新增插件内 Agent 时的检查清单
 
 接入侧最小检查：
 
@@ -104,7 +119,7 @@ flowchart TB
 5. 如需按语言调整运行时逻辑，在 `AiAgent` 子类中调用 `currentLanguage()` / `currentUserContext()`，不要自行扩展接口参数。
 6. 若需兼容旧客户端字符串，在 **`AgentRouter#route`** 增加别名映射（旧别名 → 实际 `getAgentId()`）。
 
-## 9. 关键代码位置索引
+## 10. 关键代码位置索引
 
 | 主题 | 路径（仓库内相对 j2agent） |
 |------|----------------------------------------|
@@ -115,6 +130,7 @@ flowchart TB
 | 热门问题模板 | 插件 JAR 内 `qa-template.json` + `AiAgent#isQaTemplateEnabled()`；`QaTemplateController` |
 | 对话编排 | [`ChatService.java`](../../j2agent/j2agent-server/src/main/java/io/github/jerryt92/j2agent/service/llm/ChatService.java) |
 | WebSocket 与 listAgents | [`ChatController.java`](../../j2agent/j2agent-server/src/main/java/io/github/jerryt92/j2agent/controller/ChatController.java) |
+| 知识库 grep/read 工具 | [`KnowledgeRepoGrepTools.java`](../../../j2agent-plugins-agents/common-tools/src/main/java/io/github/jerryt92/j2agent/plugins/tool/KnowledgeRepoGrepTools.java) |
 
 ---
 
